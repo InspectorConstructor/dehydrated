@@ -33,11 +33,11 @@ _mktemp() {
 # Check for script dependencies
 check_dependencies() {
   # just execute some dummy and/or version commands to see if required tools exist and are actually usable
-  "${OPENSSL}" version > /dev/null 2>&1 || _exiterr "This script requires an openssl binary."
-  _sed "" < /dev/null > /dev/null 2>&1 || _exiterr "This script requires sed with support for extended (modern) regular expressions."
-  command -v grep > /dev/null 2>&1 || _exiterr "This script requires grep."
-  command -v mktemp > /dev/null 2>&1 || _exiterr "This script requires mktemp."
-  command -v diff > /dev/null 2>&1 || _exiterr "This script requires diff."
+  "${OPENSSL}" version > /dev/null 2>&1 || _exiterr "This script requires an openssl binary." $ERR_MISSING_OPENSSL
+  _sed "" < /dev/null > /dev/null 2>&1 || _exiterr "This script requires sed with support for extended (modern) regular expressions." $ERR_MISSING_SED
+  command -v grep > /dev/null 2>&1 || _exiterr "This script requires grep." $ERR_MISSING_GREP
+  command -v mktemp > /dev/null 2>&1 || _exiterr "This script requires mktemp." $ERR_MISSING_MKTEMP
+  command -v diff > /dev/null 2>&1 || _exiterr "This script requires diff." $ERR_MISSING_DIFF
 
   # curl returns with an error code in some ancient versions so we have to catch that
   set +e
@@ -45,7 +45,7 @@ check_dependencies() {
   retcode="$?"
   set -e
   if [[ ! "${retcode}" = "0" ]] && [[ ! "${retcode}" = "2" ]]; then
-    _exiterr "This script requires curl."
+    _exiterr "This script requires curl." $ERR_MISSING_DEPENDENCY
   fi
 }
 
@@ -79,16 +79,16 @@ reset_configvars() {
 
 # verify configuration values
 verify_config() {
-  [[ "${CHALLENGETYPE}" == "http-01" || "${CHALLENGETYPE}" == "dns-01" ]] || _exiterr "Unknown challenge type ${CHALLENGETYPE}... cannot continue."
+  [[ "${CHALLENGETYPE}" == "http-01" || "${CHALLENGETYPE}" == "dns-01" ]] || _exiterr "Unknown challenge type ${CHALLENGETYPE}... cannot continue." $ERR_UNKNOWN_CHALLENGE 
   if [[ "${CHALLENGETYPE}" = "dns-01" ]] && [[ -z "${HOOK}" ]]; then
-    _exiterr "Challenge type dns-01 needs a hook script for deployment... cannot continue."
+    _exiterr "Challenge type dns-01 needs a hook script for deployment... cannot continue." $ERR_HOOK_REQUIRED 
   fi
   if [[ "${CHALLENGETYPE}" = "http-01" && ! -d "${WELLKNOWN}" && ! "${COMMAND:-}" = "register" ]]; then
-    _exiterr "WELLKNOWN directory doesn't exist, please create ${WELLKNOWN} and set appropriate permissions."
+    _exiterr "WELLKNOWN directory doesn't exist, please create ${WELLKNOWN} and set appropriate permissions." $ERR_MISSING_WELLKNOWN
   fi
-  [[ "${KEY_ALGO}" == "rsa" || "${KEY_ALGO}" == "prime256v1" || "${KEY_ALGO}" == "secp384r1" ]] || _exiterr "Unknown public key algorithm ${KEY_ALGO}... cannot continue."
+  [[ "${KEY_ALGO}" == "rsa" || "${KEY_ALGO}" == "prime256v1" || "${KEY_ALGO}" == "secp384r1" ]] || _exiterr "Unknown public key algorithm ${KEY_ALGO}... cannot continue." $ERR_UNKNOWN_KEY_ALGO
   if [[ -n "${IP_VERSION}" ]]; then
-    [[ "${IP_VERSION}" = "4" || "${IP_VERSION}" = "6" ]] || _exiterr "Unknown IP version ${IP_VERSION}... cannot continue."
+    [[ "${IP_VERSION}" = "4" || "${IP_VERSION}" = "6" ]] || _exiterr "Unknown IP version ${IP_VERSION}... cannot continue." $ERR_UNKNOWN_IP_VERSION
   fi
 }
 
@@ -144,12 +144,12 @@ load_config() {
     # shellcheck disable=SC1090
     . "${CONFIG}"
   else
-    _exiterr "Specified config file doesn't exist."
+    _exiterr "Specified config file doesn't exist." $ERR_CONFIG_FILE_DOESNT_EXIST
   fi
 
   if [[ -n "${CONFIG_D}" ]]; then
     if [[ ! -d "${CONFIG_D}" ]]; then
-      _exiterr "The path ${CONFIG_D} specified for CONFIG_D does not point to a directory."
+      _exiterr "The path ${CONFIG_D} specified for CONFIG_D does not point to a directory." $ERR_CONFIG_D_NOT_DIR
     fi
 
     for check_config_d in "${CONFIG_D}"/*.sh; do
@@ -161,7 +161,7 @@ load_config() {
         # shellcheck disable=SC1090
         . "${check_config_d}"
       else
-        _exiterr "Specified additional config ${check_config_d} is not readable or not a file at all."
+        _exiterr "Specified additional config ${check_config_d} is not readable or not a file at all." $ERR_UNREADABLE_ADDITIONAL_CONFIG_FILE 
       fi
    done
   fi
@@ -173,7 +173,7 @@ load_config() {
   [[ "$BASEDIR" != "/" ]] && BASEDIR="${BASEDIR%%/}"
 
   # Check BASEDIR and set default variables
-  [[ -d "${BASEDIR}" ]] || _exiterr "BASEDIR does not exist: ${BASEDIR}"
+  [[ -d "${BASEDIR}" ]] || _exiterr "BASEDIR does not exist: ${BASEDIR}" $ERR_BASEDIR_DOESNT_EXIST
 
   CAHASH="$(echo "${CA}" | urlbase64)"
   [[ -z "${ACCOUNTDIR}" ]] && ACCOUNTDIR="${BASEDIR}/accounts"
@@ -220,8 +220,8 @@ init_system() {
   # Lockfile handling (prevents concurrent access)
   if [[ -n "${LOCKFILE}" ]]; then
     LOCKDIR="$(dirname "${LOCKFILE}")"
-    [[ -w "${LOCKDIR}" ]] || _exiterr "Directory ${LOCKDIR} for LOCKFILE ${LOCKFILE} is not writable, aborting."
-    ( set -C; date > "${LOCKFILE}" ) 2>/dev/null || _exiterr "Lock file '${LOCKFILE}' present, aborting."
+    [[ -w "${LOCKDIR}" ]] || _exiterr "Directory ${LOCKDIR} for LOCKFILE ${LOCKFILE} is not writable, aborting." $ERR_LOCKFILE_DIR_UNWRITABLE
+    ( set -C; date > "${LOCKFILE}" ) 2>/dev/null || _exiterr "Lock file '${LOCKFILE}' present, aborting." $ERR_LOCK_FILE_PRESENT
     remove_lock() { rm -f "${LOCKFILE}"; }
     trap 'remove_lock' EXIT
   fi
@@ -233,7 +233,7 @@ init_system() {
   CA_NEW_REG="$(printf "%s" "${CA_DIRECTORY}" | get_json_string_value new-reg)" &&
   # shellcheck disable=SC2015
   CA_REVOKE_CERT="$(printf "%s" "${CA_DIRECTORY}" | get_json_string_value revoke-cert)" ||
-  _exiterr "Problem retrieving ACME/CA-URLs, check if your configured CA points to the directory entrypoint."
+  _exiterr "Problem retrieving ACME/CA-URLs, check if your configured CA points to the directory entrypoint." $ERR_CA_URLS
   # Since reg URI is missing from directory we will assume it is the same as CA_NEW_REG without the new part
   CA_REG=${CA_NEW_REG/new-reg/reg}
 
@@ -255,7 +255,7 @@ init_system() {
         printf '\n' >&2
         printf 'Error retrieving terms of service from certificate authority.\n' >&2
         printf 'Please set LICENSE in config manually.\n' >&2
-        exit 1
+        exit $ERR_RETRIEVING_TOS_FAILED
       fi
       if [[ ! "${LICENSE}" = "${REAL_LICENSE}" ]]; then
         if [[ "${PARAM_ACCEPT_TERMS:-}" = "yes" ]]; then
@@ -264,7 +264,7 @@ init_system() {
           printf '\n' >&2
           printf 'To use dehydrated with this certificate authority you have to agree to their terms of service which you can find here: %s\n\n' "${REAL_LICENSE}" >&2
           printf 'To accept these terms of service run `%s --register --accept-terms`.\n' "${0}" >&2
-          exit 1
+          exit $ERR_REJECTED_TOS
         fi
       fi
 
@@ -273,7 +273,7 @@ init_system() {
       register_new_key="yes"
     fi
   fi
-  "${OPENSSL}" rsa -in "${ACCOUNT_KEY}" -check 2>/dev/null > /dev/null || _exiterr "Account key is not valid, cannot continue."
+  "${OPENSSL}" rsa -in "${ACCOUNT_KEY}" -check 2>/dev/null > /dev/null || _exiterr "Account key is not valid, cannot continue." $ERR_INVALID_ACCOUNT_KEY
 
   # Get public components from private key and calculate thumbprint
   pubExponent64="$(printf '%x' "$("${OPENSSL}" rsa -in "${ACCOUNT_KEY}" -noout -text | awk '/publicExponent/ {print $2}')" | hex2bin | urlbase64)"
@@ -305,7 +305,7 @@ init_system() {
       echo >&2
       echo "Error registering account key. See message above for more information." >&2
       rm "${ACCOUNT_KEY}" "${ACCOUNT_KEY_JSON}"
-      exit 1
+      exit $ERR_ACCOUNT_REG
     fi
   elif [[ "${COMMAND:-}" = "register" ]]; then
     echo "+ Account already registered!"
@@ -325,7 +325,11 @@ _sed() {
 # Print error message and exit with error
 _exiterr() {
   echo "ERROR: ${1}" >&2
-  exit 1
+  if [ -z "$2" ]; then 
+    exit 1
+  else
+    exit $2
+  fi
 }
 
 # Remove newlines and whitespace from json
@@ -379,7 +383,11 @@ _openssl() {
     echo "Details:" >&2
     echo "${out}" >&2
     echo >&2
-    exit ${res}
+    if [[ ${USE_OPENSSL_RC} -ne 0 ]]; then 
+      exit ${res}
+    else 
+      exit $ERR_OPENSSL
+    fi
   fi
 }
 
@@ -403,12 +411,12 @@ http_request() {
     curlret="${?}"
   else
     set -e
-    _exiterr "Unknown request method: ${1}"
+    _exiterr "Unknown request method: ${1}" $ERR_HTTP_UNKNOWN_REQUEST
   fi
   set -e
 
   if [[ ! "${curlret}" = "0" ]]; then
-    _exiterr "Problem connecting to server (${1} for ${2}; curl returned with ${curlret})"
+    _exiterr "Problem connecting to server (${1} for ${2}; curl returned with ${curlret})" $ERR_HTTP_CONNECTION_ERROR
   fi
 
   if [[ ! "${statuscode:0:1}" = "2" ]]; then
@@ -440,7 +448,7 @@ http_request() {
 
       # remove temporary domains.txt file if used
       [[ -n "${PARAM_DOMAIN:-}" && -n "${DOMAINS_TXT:-}" ]] && rm "${DOMAINS_TXT}"
-      exit 1
+      exit $ERR_HTTP_REQUEST_FAILED
     fi
   fi
 
@@ -478,7 +486,7 @@ extract_altnames() {
   csr="${1}" # the CSR itself (not a file)
 
   if ! <<<"${csr}" "${OPENSSL}" req -verify -noout 2>/dev/null; then
-    _exiterr "Certificate signing request isn't valid"
+    _exiterr "Certificate signing request isn't valid" $ERR_CERT_SIGNING_REQUEST_INVALID
   fi
 
   reqtext="$( <<<"${csr}" "${OPENSSL}" req -noout -text )"
@@ -490,7 +498,7 @@ extract_altnames() {
     altnames="$( <<<"${altnames}" _sed -e 's/^[[:space:]]*//; s/, /\'$'\n''/g' )"
     # we can only get DNS: ones signed
     if grep -qEv '^(DNS|othername):' <<<"${altnames}"; then
-      _exiterr "Certificate signing request contains non-DNS Subject Alternative Names"
+      _exiterr "Certificate signing request contains non-DNS Subject Alternative Names" $ERR_CERT_SIGNING_REQUEST_NON_DNS
     fi
     # strip away the DNS: prefix
     altnames="$( <<<"${altnames}" _sed -e 's/^(DNS:|othername:<unsupported>)//' )"
@@ -510,7 +518,7 @@ sign_csr() {
   if { true >&3; } 2>/dev/null; then
     : # fd 3 looks OK
   else
-    _exiterr "sign_csr: FD 3 not open"
+    _exiterr "sign_csr: FD 3 not open" $ERR_FD_OPEN_FAIL
   fi
 
   shift 1 || true
@@ -521,7 +529,7 @@ sign_csr() {
   export altnames
 
   if [[ -z "${CA_NEW_AUTHZ}" ]] || [[ -z "${CA_NEW_CERT}" ]]; then
-    _exiterr "Certificate authority doesn't allow certificate signing"
+    _exiterr "Certificate authority doesn't allow certificate signing" $ERR_CA_DOESNT_SIGN
   fi
 
   local idx=0
@@ -550,7 +558,7 @@ sign_csr() {
     challenge_uri="$(printf '%s' "${challenge}" | get_json_string_value uri)"
 
     if [[ -z "${challenge_token}" ]] || [[ -z "${challenge_uri}" ]]; then
-      _exiterr "Can't retrieve challenges (${response})"
+      _exiterr "Can't retrieve challenges (${response})" $ERR_CANT_RETRIEVE_CAHLLENGES
     fi
 
     # Challenge response consists of the challenge token and the thumbprint of our public certificate
@@ -641,7 +649,7 @@ sign_csr() {
       done
     fi
 
-    _exiterr "Challenge is invalid! (returned: ${reqstatus}) (result: ${result})"
+    _exiterr "Challenge is invalid! (returned: ${reqstatus}) (result: ${result})" $ERR_CHALLENGE_INVALID
   fi
 
   # Finally request certificate from the acme-server and store it in cert-${timestamp}.pem and link from cert.pem
@@ -701,7 +709,7 @@ walk_chain() {
     # PKCS7
     elif "${OPENSSL}" pkcs7 -in "${tmpcert_raw}" -inform DER -out "${tmpcert}" -outform PEM -print_certs 2> /dev/null > /dev/null; then :
     # Unknown certificate type
-    else _exiterr "Unknown certificate type in chain"
+    else _exiterr "Unknown certificate type in chain" $ERR_UNKNOWN_CERT_TYPE
     fi
 
     local next_issuer_cert_uri
@@ -725,7 +733,7 @@ sign_domain() {
 
   echo " + Signing domains..."
   if [[ -z "${CA_NEW_AUTHZ}" ]] || [[ -z "${CA_NEW_CERT}" ]]; then
-    _exiterr "Certificate authority doesn't allow certificate signing"
+    _exiterr "Certificate authority doesn't allow certificate signing" $ERR_CA_DOESNT_SIGN
   fi
 
   local certdir="${CERTDIR}/${domain}"
@@ -733,7 +741,7 @@ sign_domain() {
   # If there is no existing certificate directory => make it
   if [[ ! -e "${certdir}" ]]; then
     echo " + Creating new directory ${certdir} ..."
-    mkdir -p "${certdir}" || _exiterr "Unable to create directory ${certdir}"
+    mkdir -p "${certdir}" || _exiterr "Unable to create directory ${certdir}" $ERR_CANT_CREATE_CERTDIR
   fi
   if [ ! -d "${CHAINCACHE}" ]; then
     echo " + Creating chain cache directory ${CHAINCACHE}"
@@ -810,7 +818,7 @@ sign_domain() {
     echo " + Walking chain..."
     local issuer_cert_uri
     issuer_cert_uri="$(get_issuer_cert_uri "${crt_path}" || echo "unknown")"
-    (walk_chain "${crt_path}" > "${certdir}/chain-${timestamp}.pem") || _exiterr "Walking chain has failed, your certificate has been created and can be found at ${crt_path}, the corresponding private key at ${privkey}. If you want you can manually continue on creating and linking all necessary files. If this error occurs again you should manually generate the certificate chain and place it under ${CHAINCACHE}/${issuer_hash}.chain (see ${issuer_cert_uri})"
+    (walk_chain "${crt_path}" > "${certdir}/chain-${timestamp}.pem") || _exiterr "Walking chain has failed, your certificate has been created and can be found at ${crt_path}, the corresponding private key at ${privkey}. If you want you can manually continue on creating and linking all necessary files. If this error occurs again you should manually generate the certificate chain and place it under ${CHAINCACHE}/${issuer_hash}.chain (see ${issuer_cert_uri})" $ERR_CHAIN_WALK_FAILED
     cat "${certdir}/chain-${timestamp}.pem" > "${CHAINCACHE}/${issuer_hash}.chain"
   fi
   cat "${certdir}/chain-${timestamp}.pem" >> "${certdir}/fullchain-${timestamp}.pem"
@@ -876,7 +884,7 @@ command_account() {
 
   # Check if we have the registration id
   if [[ -z "${REG_ID}" ]]; then
-    _exiterr "Error retrieving registration id."
+    _exiterr "Error retrieving registration id." $ERR_OBTAIN_REG_ID_FAILED
   fi
 
   echo "+ Updating registration id: ${REG_ID} contact information..."
@@ -889,7 +897,7 @@ command_account() {
 
   if [[ "${FAILED}" = "true" ]]; then
     rm "${NEW_ACCOUNT_KEY_JSON}"
-    _exiterr "Error updating account information. See message above for more information."
+    _exiterr "Error updating account information. See message above for more information." $ERR_UPDATING_ACCT
   fi
   if diff -q "${NEW_ACCOUNT_KEY_JSON}" "${ACCOUNT_KEY_JSON}" > /dev/null; then
     echo "+ Account information was the same after the update"
@@ -916,10 +924,10 @@ command_sign_domains() {
     printf -- "${PARAM_DOMAIN}" > "${DOMAINS_TXT}"
   elif [[ -e "${DOMAINS_TXT}" ]]; then
     if [[ ! -r "${DOMAINS_TXT}" ]]; then
-      _exiterr "domains.txt found but not readable"
+      _exiterr "domains.txt found but not readable" $ERR_DOMAINS_TXT_UNREADABLE
     fi
   else
-    _exiterr "domains.txt not found and --domain not given"
+    _exiterr "domains.txt not found and --domain not given" $ERR_NO_DOMAIN_SPECIFIED
   fi
 
   # Generate certificates for all domains found in domains.txt. Check if existing certificate are about to expire
@@ -1082,7 +1090,7 @@ command_sign_csr() {
 
   csrfile="${1}"
   if [ ! -r "${csrfile}" ]; then
-    _exiterr "Could not read certificate signing request ${csrfile}"
+    _exiterr "Could not read certificate signing request ${csrfile}" $ERR_CSR_FILE_UNREADABLE
   fi
 
   # gen cert
@@ -1124,7 +1132,7 @@ command_sign_csr() {
 command_revoke() {
   init_system
 
-  [[ -n "${CA_REVOKE_CERT}" ]] || _exiterr "Certificate authority doesn't allow certificate revocation."
+  [[ -n "${CA_REVOKE_CERT}" ]] || _exiterr "Certificate authority doesn't allow certificate revocation." $ERR_CA_DOESNT_REVOKE
 
   cert="${1}"
   if [[ -L "${cert}" ]]; then
@@ -1137,7 +1145,7 @@ command_revoke() {
       cert="$(dirname "${cert}")/${link_target}"
     fi
   fi
-  [[ -f "${cert}" ]] || _exiterr "Could not find certificate ${cert}"
+  [[ -f "${cert}" ]] || _exiterr "Could not find certificate ${cert}" $ERR_CERT_MISSING
 
   echo "Revoking ${cert}"
 
@@ -1214,14 +1222,14 @@ command_help() {
   echo "Commands:"
   grep -e '^[[:space:]]*# Usage:' -e '^[[:space:]]*# Description:' -e '^command_.*()[[:space:]]*{' "${0}" | while read -r usage; read -r description; read -r command; do
     if [[ ! "${usage}" =~ Usage ]] || [[ ! "${description}" =~ Description ]] || [[ ! "${command}" =~ ^command_ ]]; then
-      _exiterr "Error generating help text."
+      _exiterr "Error generating help text." $ERR_USAGE
     fi
     printf " %-32s %s\n" "${usage##"# Usage: "}" "${description##"# Description: "}"
   done
   printf -- "\nParameters:\n"
   grep -E -e '^[[:space:]]*# PARAM_Usage:' -e '^[[:space:]]*# PARAM_Description:' "${0}" | while read -r usage; read -r description; do
     if [[ ! "${usage}" =~ Usage ]] || [[ ! "${description}" =~ Description ]]; then
-      _exiterr "Error generating help text."
+      _exiterr "Error generating help text." $ERR_USAGE
     fi
     printf " %-32s %s\n" "${usage##"# PARAM_Usage: "}" "${description##"# PARAM_Description: "}"
   done
@@ -1235,11 +1243,160 @@ command_env() {
   typeset -p CA LICENSE CERTDIR CHALLENGETYPE DOMAINS_D DOMAINS_TXT HOOK HOOK_CHAIN RENEW_DAYS ACCOUNT_KEY ACCOUNT_KEY_JSON KEYSIZE WELLKNOWN PRIVATE_KEY_RENEW OPENSSL_CNF CONTACT_EMAIL LOCKFILE
 }
 
+# set readonly variables used as return codes
+set_return_codes()
+{
+  if [["$1" = "simple" ]] ; then
+   readonly USE_OPENSSL_RC=0
+   ## aggregated return codes: used to set the individual error codes below
+   readonly ERR_INVOCATION=2
+   readonly ERR_MISSING_DEPENDENCY=3
+   readonly ERR_BAD_CONFIG=4
+   readonly ERR_NETWORK=5
+   readonly ERR_CA=6
+   readonly ERR_ACCOUNT=7
+   readonly ERR_CERT=8
+   readonly ERR_SYS_RUNTIME=9
+   readonly ERR_FILESYSTEM=10 #permissions and such
+   readonly ERR_ALREADY_RUNNING=11
+   readonly ERR_OPENSSL=12
+   readonly ERR_OTHER=127
+   ## Individual return codes
+   readonly ERR_REJECTED_TOS=1
+   readonly ERR_NO_DOMAIN_SPECIFIED=$ERR_INVOCATION
+   readonly ERR_USAGE=$ERR_INVOCATION
+   readonly ERR_MULTIPLE_COMMANDS=$ERR_INVOCATION
+   readonly ERR_MISSING_PARAMS=$ERR_INVOCATION
+   readonly ERR_INVALID_ARG=$ERR_INVOCATION
+   readonly ERR_UNKNOWN_PARAM=$ERR_INVOCATION
+   readonly ERR_INVALID_COMMAND=$ERR_INVOCATION
+   readonly ERR_MISSING_OPENSSL=$ERR_MISSING_DEPENDENCY
+   readonly ERR_MISSING_SED=$ERR_MISSING_DEPENDENCY
+   readonly ERR_MISSING_GREP=$ERR_MISSING_DEPENDENCY
+   readonly ERR_MISSING_MKTEMP=$ERR_MISSING_DEPENDENCY
+   readonly ERR_UNKNOWN_CHALLENGE=$ERR_BAD_CONFIG
+   readonly ERR_HOOK_REQUIRED=$ERR_BAD_CONFIG
+   readonly ERR_MISSING_WELLKNOWN=$ERR_BAD_CONFIG
+   readonly ERR_UNKNOWN_KEY_ALGO=$ERR_BAD_CONFIG
+   readonly ERR_UNKNOWN_IP_VERSION=$ERR_BAD_CONFIG
+   readonly ERR_CONFIG_FILE_DOESNT_EXIST=$ERR_BAD_CONFIG
+   readonly ERR_CONFIG_D_NOT_DIR=$ERR_BAD_CONFIG
+   readonly ERR_UNREADABLE_ADDITIONAL_CONFIG_FILE=$ERR_BAD_CONFIG
+   readonly ERR_BASEDIR_DOESNT_EXIST=$ERR_BAD_CONFIG
+   readonly ERR_CA_URLS=$ERR_BAD_CONFIG ##
+   readonly ERR_LOCK_FILE_PRESENT=$ERR_ALREADY_RUNNING
+   readonly ERR_RETRIEVING_TOS_FAILED=$ERR_CA
+   readonly ERR_INVALID_ACCOUNT_KEY=$ERR_CA ## double check this
+   readonly ERR_CA_DOESNT_SIGN=$ERR_CA
+   readonly ERR_CA_DOESNT_REVOKE=$ERR_CA
+   readonly ERR_ACCOUNT_REG_FAILED=$ERR_CA ## check this too, might be runtime
+   readonly ERR_HTTP_UNKNOWN_REQUEST=$ERR_NETWORK
+   readonly ERR_HTTP_CONNECTION_ERROR=$ERR_NETWORK
+   readonly ERR_HTTP_REQUEST_FAILED=$ERR_NETWORK
+   readonly ERR_CERT_SIGNING_REQUEST_INVALID=$ERR_CERT
+   readonly ERR_CERT_SIGNING_REQUEST_NON_DNS=$ERR_CERT
+   readonly ERR_CHALLENGE_INVALID=$ERR_CERT  #cert signing error
+   readonly ERR_UNKNOWN_CERT_TYPE=$ERR_CERT
+   readonly ERR_CHAIN_WALK_FAILED=$ERR_CERT
+   readonly ERR_FD_OPEN_FAIL=$ERR_SYS_RUNTIME
+   readonly ERR_CANT_CREATE_CERTDIR=$ERR_FILESYSTEM
+   readonly ERR_DOMAINS_TXT_UNREADABLE=$ERR_FILESYSTEM
+   readonly ERR_LOCKFILE_DIR_UNWRITABLE=$ERR_FILESYSTEM
+  elif [["$1" = "granular" ]] ; then
+   readonly USE_OPENSSL_RC=0
+   readonly ERR_REJECTED_TOS=1
+   readonly ERR_OPENSSL=2
+   readonly ERR_USAGE=3
+   readonly ERR_NO_DOMAIN_SPECIFIED=4
+   readonly ERR_MULTIPLE_COMMANDS=5
+   readonly ERR_MISSING_PARAMS=6
+   readonly ERR_INVALID_ARG=7
+   readonly ERR_UNKNOWN_PARAM=8
+   readonly ERR_INVALID_COMMAND=9
+   readonly ERR_MISSING_OPENSSL=10
+   readonly ERR_MISSING_SED=11
+   readonly ERR_MISSING_GREP=12
+   readonly ERR_MISSING_MKTEMP=13
+   readonly ERR_UNKNOWN_CHALLENGE=14
+   readonly ERR_HOOK_REQUIRED=15
+   readonly ERR_MISSING_WELLKNOWN=16
+   readonly ERR_UNKNOWN_KEY_ALGO=17
+   readonly ERR_UNKNOWN_IP_VERSION=18
+   readonly ERR_CONFIG_FILE_DOESNT_EXIST=19
+   readonly ERR_CONFIG_D_NOT_DIR=20
+   readonly ERR_UNREADABLE_ADDITIONAL_CONFIG_FILE=21
+   readonly ERR_BASEDIR_DOESNT_EXIST=22
+   readonly ERR_CA_URLS=23
+   readonly ERR_LOCK_FILE_PRESENT=24
+   readonly ERR_RETRIEVING_TOS_FAILED=25
+   readonly ERR_INVALID_ACCOUNT_KEY=26
+   readonly ERR_CA_DOESNT_SIGN=27
+   readonly ERR_CA_DOESNT_REVOKE=28
+   readonly ERR_ACCOUNT_REG_FAILED=29
+   readonly ERR_HTTP_UNKNOWN_REQUEST=30
+   readonly ERR_HTTP_CONNECTION_ERROR=31
+   readonly ERR_HTTP_REQUEST_FAILED=32
+   readonly ERR_CERT_SIGNING_REQUEST_INVALID=33
+   readonly ERR_CERT_SIGNING_REQUEST_NON_DNS=34
+   readonly ERR_CHALLENGE_INVALID=35  #cert signing error
+   readonly ERR_UNKNOWN_CERT_TYPE=36
+   readonly ERR_CHAIN_WALK_FAILED=37
+   readonly ERR_FD_OPEN_FAIL=38
+   readonly ERR_CANT_CREATE_CERTDIR=39
+   readonly ERR_DOMAINS_TXT_UNREADABLE=40
+   readonly ERR_LOCKFILE_DIR_UNWRITABLE=41
+  else
+   readonly USE_OPENSSL_RC=1
+   readonly ERR_REJECTED_TOS=1
+   readonly ERR_OPENSSL=1
+   readonly ERR_USAGE=1
+   readonly ERR_NO_DOMAIN_SPECIFIED=1
+   readonly ERR_MULTIPLE_COMMANDS=1
+   readonly ERR_MISSING_PARAMS=1
+   readonly ERR_INVALID_ARG=1
+   readonly ERR_UNKNOWN_PARAM=1
+   readonly ERR_INVALID_COMMAND=1
+   readonly ERR_MISSING_OPENSSL=1
+   readonly ERR_MISSING_SED=1
+   readonly ERR_MISSING_GREP=1
+   readonly ERR_MISSING_MKTEMP=1
+   readonly ERR_UNKNOWN_CHALLENGE=1
+   readonly ERR_HOOK_REQUIRED=1
+   readonly ERR_MISSING_WELLKNOWN=1
+   readonly ERR_UNKNOWN_KEY_ALGO=1
+   readonly ERR_UNKNOWN_IP_VERSION=1
+   readonly ERR_CONFIG_FILE_DOESNT_EXIST=1
+   readonly ERR_CONFIG_D_NOT_DIR=1
+   readonly ERR_UNREADABLE_ADDITIONAL_CONFIG_FILE=1
+   readonly ERR_BASEDIR_DOESNT_EXIST=1
+   readonly ERR_CA_URLS=1
+   readonly ERR_LOCK_FILE_PRESENT=1
+   readonly ERR_RETRIEVING_TOS_FAILED=1
+   readonly ERR_INVALID_ACCOUNT_KEY=1
+   readonly ERR_CA_DOESNT_SIGN=1
+   readonly ERR_CA_DOESNT_REVOKE=1
+   readonly ERR_ACCOUNT_REG_FAILED=1
+   readonly ERR_HTTP_UNKNOWN_REQUEST=1
+   readonly ERR_HTTP_CONNECTION_ERROR=1
+   readonly ERR_HTTP_REQUEST_FAILED=1
+   readonly ERR_CERT_SIGNING_REQUEST_INVALID=1
+   readonly ERR_CERT_SIGNING_REQUEST_NON_DNS=1
+   readonly ERR_CHALLENGE_INVALID=1 #cert signing error
+   readonly ERR_UNKNOWN_CERT_TYPE=1
+   readonly ERR_CHAIN_WALK_FAILED=1
+   readonly ERR_FD_OPEN_FAIL=1
+   readonly ERR_CANT_CREATE_CERTDIR=1
+   readonly ERR_DOMAINS_TXT_UNREADABLE=1
+   readonly ERR_LOCKFILE_DIR_UNWRITABLE=1
+  fi
+}
+
 # Main method (parses script arguments and calls command_* methods)
 main() {
   COMMAND=""
+  set_return_codes "granular"
   set_command() {
-    [[ -z "${COMMAND}" ]] || _exiterr "Only one command can be executed at a time. See help (-h) for more information."
+    [[ -z "${COMMAND}" ]] || _exiterr "Only one command can be executed at a time. See help (-h) for more information." $ERR_MULTIPLE_COMMANDS
     COMMAND="${1}"
   }
 
@@ -1248,9 +1405,9 @@ main() {
       echo "The specified command requires additional parameters. See help:" >&2
       echo >&2
       command_help >&2
-      exit 1
+      exit $ERR_MISSING_PARAMS
     elif [[ "${1:0:1}" = "-" ]]; then
-      _exiterr "Invalid argument: ${1}"
+      _exiterr "Invalid argument: ${1}" $ERR_INVALID_ARG
     fi
   }
 
@@ -1421,7 +1578,7 @@ main() {
         echo "Unknown parameter detected: ${1}" >&2
         echo >&2
         command_help >&2
-        exit 1
+        exit $ERR_UNKNOWN_PARAM
         ;;
     esac
 
@@ -1437,7 +1594,7 @@ main() {
     revoke) command_revoke "${PARAM_REVOKECERT}";;
     cleanup) command_cleanup;;
     version) command_version;;
-    *) command_help; exit 1;;
+    *) command_help; exit $ERR_INVALID_COMMAND;;
   esac
 }
 
