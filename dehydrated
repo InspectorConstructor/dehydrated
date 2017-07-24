@@ -1246,7 +1246,7 @@ command_env() {
 # set readonly variables used as return codes
 set_return_codes()
 {
-  if [["$1" = "simple" ]] ; then
+  if [[ "$1" = "simple" ]] ; then
    readonly USE_OPENSSL_RC=0
    ## aggregated return codes: used to set the individual error codes below
    readonly ERR_INVOCATION=2
@@ -1302,7 +1302,7 @@ set_return_codes()
    readonly ERR_CANT_CREATE_CERTDIR=$ERR_FILESYSTEM
    readonly ERR_DOMAINS_TXT_UNREADABLE=$ERR_FILESYSTEM
    readonly ERR_LOCKFILE_DIR_UNWRITABLE=$ERR_FILESYSTEM
-  elif [["$1" = "granular" ]] ; then
+  elif [[ "$1" = "granular" ]] ; then
    readonly USE_OPENSSL_RC=0
    readonly ERR_REJECTED_TOS=1
    readonly ERR_OPENSSL=2
