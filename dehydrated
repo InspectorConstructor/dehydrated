@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/usr/bin/bash
 
 # dehydrated by lukas2511
 # Source: https://dehydrated.de
@@ -916,6 +916,8 @@ command_account() {
 # Usage: --cron (-c)
 # Description: Sign/renew non-existent/changed/expiring certificates.
 command_sign_domains() {
+  local rc
+  rc=$NOTHING_TO_DO;
   init_system
   [[ -n "${HOOK}" ]] && "${HOOK}" "startup_hook"
 
@@ -1037,6 +1039,7 @@ command_sign_domains() {
     # shellcheck disable=SC2086
     if [[ ! "${skip}" = "yes" ]]; then
       update_ocsp="yes"
+      rc=0 #nrs
       if [[ "${PARAM_KEEP_GOING:-}" = "yes" ]]; then
         sign_domain ${line} &
         wait $! || true
@@ -1076,7 +1079,7 @@ command_sign_domains() {
     echo "+ Running automatic cleanup"
     command_cleanup noinit
   fi
-  exit 0
+  exit $rc
 }
 
 # Usage: --signcsr (-s) path/to/csr.pem
@@ -1345,6 +1348,7 @@ set_return_codes()
    readonly ERR_CANT_CREATE_CERTDIR=39
    readonly ERR_DOMAINS_TXT_UNREADABLE=40
    readonly ERR_LOCKFILE_DIR_UNWRITABLE=41
+   readonly NOTHING_TO_DO=100
   else
    readonly USE_OPENSSL_RC=1
    readonly ERR_REJECTED_TOS=1
@@ -1388,6 +1392,7 @@ set_return_codes()
    readonly ERR_CANT_CREATE_CERTDIR=1
    readonly ERR_DOMAINS_TXT_UNREADABLE=1
    readonly ERR_LOCKFILE_DIR_UNWRITABLE=1
+   readonly NOTHING_TO_DO=0
   fi
 }
 
