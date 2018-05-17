@@ -240,6 +240,10 @@ init_system() {
   # Export some environment variables to be used in hook script
   export WELLKNOWN BASEDIR CERTDIR CONFIG COMMAND
 
+  # comrex: remove old files. the filesystem is small, and these accumulate!
+  echo "init_system: removeold started"
+  removeold noinit
+
   # Checking for private key ...
   register_new_key="no"
   if [[ -n "${PARAM_ACCOUNT_KEY:-}" ]]; then
@@ -326,7 +330,7 @@ _sed() {
 _exiterr() {
   echo "ERROR: ${1}" >&2
   if [ -z "$2" ]; then 
-    exit 1
+    exit $ERR_UNSPECIFIED
   else
     exit $2
   fi
@@ -1217,6 +1221,82 @@ command_cleanup() {
   exit 0
 }
 
+removeold() {
+  if [ ! "${1:-}" = "noinit" ]; then
+    load_config
+  fi
+
+  echo removeold running
+
+  local certname
+  local domain_valid
+  local line
+  local curdomain
+  local filetype
+
+  # Loop over all certificate directories
+  for certdir in "${CERTDIR}/"*; do
+    # Skip if entry is not a folder
+    [[ -d "${certdir}" ]] || continue
+
+    # Get certificate name
+    certname="$(basename "${certdir}")"
+
+    echo judging "${certname}"
+
+    # see if this directory belongs to a domain we're using
+    domain_valid="no"
+
+    # THIS LINE IS HYPER-SPECIFIC: only works when we use the -d option
+    for line in "${PARAM_DOMAIN}"; do
+      echo comparing certname against line: "$line"
+      curdomain="$(printf '%s\n' "${line}" | cut -d' ' -f1)"
+      if [ "${curdomain}" = "${certname}" ]; then
+        echo this is a valid domain
+        domain_valid="yes"
+        break
+      fi
+    done
+
+    # remove old certdirs
+    if [ "$domain_valid" = "no" ]; then
+      echo this is an old domain. removing...
+      rm -rf "${certdir}"
+      continue
+    fi
+
+    echo cleaning this valid domain...
+
+    # Loop over file-types (certificates, keys, signing-requests, ...)
+    for filetype in cert.csr cert.pem chain.pem fullchain.pem privkey.pem ocsp.der; do
+      # Skip if symlink is broken
+      [[ -r "${certdir}/${filetype}" ]] || continue
+
+      # Look up current file in use
+      current="$(basename "$(readlink "${certdir}/${filetype}")")"
+
+      # Split filetype into name and extension
+      filebase="$(echo "${filetype}" | cut -d. -f1)"
+      fileext="$(echo "${filetype}" | cut -d. -f2)"
+
+      # Loop over all files of this type
+      for file in "${certdir}/${filebase}-"*".${fileext}" "${certdir}/${filebase}-"*".${fileext}-revoked"; do
+        # Handle case where no files match the wildcard
+        [[ -f "${file}" ]] || break
+
+        # Check if current file is in use, if unused remove
+        filename="$(basename "${file}")"
+        if [[ ! "${filename}" = "${current}" ]]; then
+          echo "Removing unused file: ${certname}/${filename}"
+          rm "${certdir}/${filename}"
+        fi
+      done
+    done
+  done
+
+  echo "removeold done!"
+}
+
 # Usage: --help (-h)
 # Description: Show help text
 command_help() {
@@ -1305,6 +1385,8 @@ set_return_codes()
    readonly ERR_CANT_CREATE_CERTDIR=$ERR_FILESYSTEM
    readonly ERR_DOMAINS_TXT_UNREADABLE=$ERR_FILESYSTEM
    readonly ERR_LOCKFILE_DIR_UNWRITABLE=$ERR_FILESYSTEM
+   readonly ERR_UNSPECIFIED=$ERR_OTHER
+   readonly NOTHING_TO_DO=100
   elif [[ "$1" = "granular" ]] ; then
    readonly USE_OPENSSL_RC=0
    readonly ERR_REJECTED_TOS=1
@@ -1348,6 +1430,7 @@ set_return_codes()
    readonly ERR_CANT_CREATE_CERTDIR=39
    readonly ERR_DOMAINS_TXT_UNREADABLE=40
    readonly ERR_LOCKFILE_DIR_UNWRITABLE=41
+   readonly ERR_UNSPECIFIED=99
    readonly NOTHING_TO_DO=100
   else
    readonly USE_OPENSSL_RC=1
@@ -1392,6 +1475,7 @@ set_return_codes()
    readonly ERR_CANT_CREATE_CERTDIR=1
    readonly ERR_DOMAINS_TXT_UNREADABLE=1
    readonly ERR_LOCKFILE_DIR_UNWRITABLE=1
+   readonly ERR_UNSPECIFIED=1
    readonly NOTHING_TO_DO=0
   fi
 }
