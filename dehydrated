@@ -277,7 +277,12 @@ init_system() {
       register_new_key="yes"
     fi
   fi
-  "${OPENSSL}" rsa -in "${ACCOUNT_KEY}" -check 2>/dev/null > /dev/null || _exiterr "Account key is not valid, cannot continue." $ERR_INVALID_ACCOUNT_KEY
+
+  if ! "${OPENSSL}" rsa -in "${ACCOUNT_KEY}" -check 2>/dev/null > /dev/null; then
+    echo Account Key "${ACCOUNT_KEY}" is invalid. Removing and exiting...
+    rm -f "${ACCOUNT_KEY}"
+    _exiterr "Account key is not valid, cannot continue." $ERR_INVALID_ACCOUNT_KEY
+  fi
 
   # Get public components from private key and calculate thumbprint
   pubExponent64="$(printf '%x' "$("${OPENSSL}" rsa -in "${ACCOUNT_KEY}" -noout -text | awk '/publicExponent/ {print $2}')" | hex2bin | urlbase64)"
@@ -1389,8 +1394,6 @@ set_return_codes()
    readonly NOTHING_TO_DO=100
   elif [[ "$1" = "granular" ]] ; then
    readonly USE_OPENSSL_RC=0
-   readonly ERR_REJECTED_TOS=1
-   readonly ERR_OPENSSL=2
    readonly ERR_USAGE=3
    readonly ERR_NO_DOMAIN_SPECIFIED=4
    readonly ERR_MULTIPLE_COMMANDS=5
@@ -1430,6 +1433,8 @@ set_return_codes()
    readonly ERR_CANT_CREATE_CERTDIR=39
    readonly ERR_DOMAINS_TXT_UNREADABLE=40
    readonly ERR_LOCKFILE_DIR_UNWRITABLE=41
+   readonly ERR_REJECTED_TOS=42
+   readonly ERR_OPENSSL=43
    readonly ERR_UNSPECIFIED=99
    readonly NOTHING_TO_DO=100
   else
